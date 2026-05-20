@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #0f172a;
+  --paper: #fbf7ef;
+  --accent: #ff6b3d;
+  --mint: #2ab7a0;
+  --sun: #ffe27a;
+  --shadow: rgba(15, 23, 42, 0.12);
+}
+
+body {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.scouter-bg {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(255, 226, 122, 0.35), transparent 60%),
+    radial-gradient(900px 500px at 90% 10%, rgba(42, 183, 160, 0.25), transparent 65%),
+    linear-gradient(180deg, #fff4e8 0%, #fbf7ef 55%, #f3efe6 100%);
+}
+
+.float-card {
+  box-shadow: 0 20px 60px var(--shadow);
+}
+
+.reveal {
+  animation: rise 0.8s ease-out both;
+}
+
+.reveal-delay {
+  animation-delay: 120ms;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
