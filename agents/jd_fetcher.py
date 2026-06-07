@@ -2,66 +2,62 @@ from __future__ import annotations
 
 import json
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.prebuilt import create_react_agent
 
+from agents.llm_provider import get_llm
+from agents.utils import _coerce_content, extract_json_text, repair_and_parse_json
 from tools.playwright_tool import playwright_fetch
 
 
 @tool("playwright_fetch")
 async def playwright_fetch_tool(url: str) -> dict:
+    """Fetch a job page and return raw HTML/text content."""
     return await playwright_fetch(url)
 
 
-def _build_trace(intermediate_steps: list) -> list[dict]:
-    trace: list[dict] = []
-    for idx, (action, observation) in enumerate(intermediate_steps, start=1):
-        trace.append(
-            {
-                "step": idx,
-                "thought": action.log,
-                "action": action.tool,
-                "observation": str(observation),
-            }
-        )
-    return trace
+SYSTEM_PROMPT = (
+    "You are the JD Fetcher agent. Use the playwright_fetch tool to fetch the job page. "
+    "Extract: role_title, company_name, required_skills (list), responsibilities (list), "
+    "location, compensation. "
+    "Your FINAL message MUST be ONLY a raw JSON object — no markdown fences, no explanation, "
+    "no other text before or after the JSON."
+)
 
 
 async def run_jd_fetcher(job_url: str) -> dict:
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
+    llm = get_llm()
     tools = [playwright_fetch_tool]
 
-    system_prompt = (
-        "You are the JD Fetcher agent. Use the tool to fetch the job page, then "
-        "extract role_title, company_name, required_skills (list), responsibilities (list), "
-        "location, compensation. Return ONLY valid JSON with these keys."
-    )
+    agent = create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
+    try:
+        result = await agent.ainvoke(
+            {"messages": [("user", f"Job URL: {job_url}")]},
+            config={"recursion_limit": 10},
+        )
+    except Exception as exc:
+        return {"error": f"JD Fetcher failed: {exc}", "trace": []}
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("user", "Job URL: {input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ]
-    )
+    messages = result.get("messages", [])
+    output = _coerce_content(messages[-1].content) if messages else ""
 
-    agent = create_react_agent(llm, tools, prompt)
-    executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=False,
-        return_intermediate_steps=True,
-        handle_parsing_errors=True,
-    )
-
-    result = await executor.ainvoke({"input": job_url})
-    trace = _build_trace(result.get("intermediate_steps", []))
-    output = result.get("output", "")
+    trace: list[dict] = []
+    for msg in messages:
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tc in msg.tool_calls:
+                trace.append({"step": len(trace) + 1, "thought": "", "action": tc.get("name", ""), "observation": ""})
+        if msg.type == "tool":
+            if trace:
+                trace[-1]["observation"] = _coerce_content(msg.content)[:500]
 
     try:
-        data = json.loads(output)
+        data = json.loads(extract_json_text(output))
         return {"data": data, "trace": trace}
     except json.JSONDecodeError:
+        pass
+
+    try:
+        data = await repair_and_parse_json(output, llm)
+        return {"data": data, "trace": trace}
+    except (json.JSONDecodeError, Exception):
         return {"error": "JD Fetcher returned invalid JSON", "raw_output": output, "trace": trace}

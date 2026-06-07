@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import chromadb
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 
 async def ingest_resume_text(user_id: str, resume_id: str, text: str) -> dict:
@@ -12,8 +11,6 @@ async def ingest_resume_text(user_id: str, resume_id: str, text: str) -> dict:
         def _ingest() -> int:
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             chunks = splitter.split_text(text)
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-            vectors = embeddings.embed_documents(chunks)
             client = chromadb.PersistentClient(path="./chroma_db")
             collection = client.get_or_create_collection(name="resume_chunks")
             ids = [f"{resume_id}_{idx}" for idx in range(len(chunks))]
@@ -21,7 +18,7 @@ async def ingest_resume_text(user_id: str, resume_id: str, text: str) -> dict:
                 {"user_id": user_id, "resume_id": resume_id, "chunk_index": idx}
                 for idx in range(len(chunks))
             ]
-            collection.upsert(ids=ids, documents=chunks, embeddings=vectors, metadatas=metadatas)
+            collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
             return len(chunks)
 
         chunk_count = await asyncio.to_thread(_ingest)

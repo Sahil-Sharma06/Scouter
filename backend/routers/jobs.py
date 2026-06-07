@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.supervisor import run_job_pipeline
-from db.database import get_db
-from db.models import User
-from routers.auth import get_current_user
+from backend.db.database import get_db
+from backend.db.models import User
+from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+PIPELINE_TIMEOUT_SECONDS = 90
 
 
 class JobAnalyseRequest(BaseModel):
@@ -27,7 +31,17 @@ async def analyse_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> JobAnalyseResponse:
-    result = await run_job_pipeline(str(payload.url), str(current_user.id), db)
+    try:
+        result = await asyncio.wait_for(
+            run_job_pipeline(str(payload.url), str(current_user.id), db),
+            timeout=PIPELINE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Pipeline did not complete within {PIPELINE_TIMEOUT_SECONDS}s. Try a simpler job URL.",
+        )
+
     if "error" in result:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
 

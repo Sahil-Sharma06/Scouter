@@ -1,0 +1,31 @@
+# virtual environments
+.venv*/
+venv/
+env/
+
+# byte-compiled / optimised
+__pycache__/
+*.py[cod]
+*.pyo
+
+# secrets
+.env
+.env.*
+
+# data stores
+chroma_db/
+
+# test & debug scripts
+test_*.py
+run_server_test.py
+
+# build / packaging
+*.egg-info/
+dist/
+build/
+
+# tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

@@ -1,7 +1,31 @@
+# Python
 **/__pycache__/
-*.pyc
-.venv/
+*.py[cod]
+*.pyo
+
+# Virtual environments (any name)
+.venv*/
+venv/
+env/
+
+# Secrets
 .env
+.env.*
+
+# Frontend deps & build
 frontend/node_modules/
-backend/.pytest_cache/
+frontend/dist/
+frontend/dist-ssr/
+
+# Data stores
 chroma_db/
+
+# Test / debug scripts at repo root
+test_*.py
+run_server_test.py
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

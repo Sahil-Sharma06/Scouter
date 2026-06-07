@@ -2,60 +2,43 @@ from __future__ import annotations
 
 import json
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_google_genai import ChatGoogleGenerativeAI
+from agents.llm_provider import get_llm
+from agents.utils import _coerce_content, extract_json_text, repair_and_parse_json
 
 
-def _build_trace(intermediate_steps: list) -> list[dict]:
-    trace: list[dict] = []
-    for idx, (action, observation) in enumerate(intermediate_steps, start=1):
-        trace.append(
-            {
-                "step": idx,
-                "thought": action.log,
-                "action": action.tool,
-                "observation": str(observation),
-            }
-        )
-    return trace
+SYSTEM_PROMPT = (
+    "You are the Outreach Drafter. Draft a personalised cold email based on the inputs. "
+    "Return ONLY a raw JSON object with keys: subject (string), body (4-paragraph string). "
+    "Tone: direct, not sycophantic. "
+    "No markdown fences, no explanation, no other text before or after the JSON."
+)
 
 
 async def run_outreach_drafter(jd_summary: dict, company_brief: dict, fit_result: dict) -> dict:
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-    tools: list = []
+    llm = get_llm()
+    user_msg = f"JD Summary: {jd_summary}\nCompany Brief: {company_brief}\nFit Result: {fit_result}"
+    messages = [
+        ("system", SYSTEM_PROMPT),
+        ("user", user_msg),
+    ]
+    try:
+        result = await llm.ainvoke(messages)
+    except Exception as exc:
+        return {"error": f"Outreach Drafter failed: {exc}", "trace": []}
 
-    system_prompt = (
-        "You are the Outreach Drafter. Draft a personalized cold email based on the inputs. "
-        "Return ONLY valid JSON with keys: subject (string), body (4-paragraph string). "
-        "Tone: direct, not sycophantic."
-    )
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("user", "JD Summary: {jd}\nCompany Brief: {brief}\nFit Result: {fit}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ]
-    )
-
-    agent = create_react_agent(llm, tools, prompt)
-    executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=False,
-        return_intermediate_steps=True,
-        handle_parsing_errors=True,
-    )
-
-    result = await executor.ainvoke({"jd": jd_summary, "brief": company_brief, "fit": fit_result})
-    trace = _build_trace(result.get("intermediate_steps", []))
-    output = result.get("output", "")
+    output = _coerce_content(result.content) if result else ""
+    trace: list[dict] = []
 
     try:
-        data = json.loads(output)
+        data = json.loads(extract_json_text(output))
         return {"data": data, "trace": trace}
     except json.JSONDecodeError:
+        pass
+
+    try:
+        data = await repair_and_parse_json(output, llm)
+        return {"data": data, "trace": trace}
+    except (json.JSONDecodeError, Exception):
         return {
             "error": "Outreach Drafter returned invalid JSON",
             "raw_output": output,

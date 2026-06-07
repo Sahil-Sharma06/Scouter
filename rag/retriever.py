@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 import chromadb
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 
 async def retrieve_resume_chunks(query: str, top_k: int = 5, user_id: str | None = None) -> dict:
@@ -11,11 +10,12 @@ async def retrieve_resume_chunks(query: str, top_k: int = 5, user_id: str | None
         def _query() -> list[dict]:
             client = chromadb.PersistentClient(path="./chroma_db")
             collection = client.get_or_create_collection(name="resume_chunks")
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-            query_embedding = embeddings.embed_query(query)
+            count = collection.count()
+            if count == 0:
+                return []
             where = {"user_id": user_id} if user_id else None
             results = collection.query(
-                query_embeddings=[query_embedding], n_results=top_k, where=where
+                query_texts=[query], n_results=min(top_k, count), where=where
             )
             docs = results.get("documents", [[]])[0]
             metas = results.get("metadatas", [[]])[0]

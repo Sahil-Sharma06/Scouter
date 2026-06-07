@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +10,7 @@ from agents.company_research import run_company_research
 from agents.fit_scorer import run_fit_scorer
 from agents.jd_fetcher import run_jd_fetcher
 from agents.outreach_drafter import run_outreach_drafter
-from db.models import JobRun
+from backend.db.models import JobRun
 from tools.resume_tool import reset_current_user, set_current_user
 
 
@@ -38,16 +40,25 @@ async def run_job_pipeline(job_url: str, user_id: str, db: AsyncSession) -> dict
 
         jd_data = jd_result["data"]
         company_name = jd_data.get("company_name", "")
+        required_skills = jd_data.get("required_skills", [])
 
-        company_result = await run_company_research(company_name)
+        # Company Research and Fit Scorer are independent — run them in parallel.
+        company_result, fit_result = await asyncio.gather(
+            run_company_research(company_name),
+            run_fit_scorer(required_skills),
+            return_exceptions=True,
+        )
+
+        if isinstance(company_result, Exception):
+            return {"error": f"Company Research failed: {company_result}"}
+        if isinstance(fit_result, Exception):
+            return {"error": f"Fit Scorer failed: {fit_result}"}
         if "error" in company_result:
             return {"error": company_result["error"], "details": company_result.get("raw_output")}
-        trace = _merge_trace(trace, company_result.get("trace", []), "company_research")
-
-        required_skills = jd_data.get("required_skills", [])
-        fit_result = await run_fit_scorer(required_skills)
         if "error" in fit_result:
             return {"error": fit_result["error"], "details": fit_result.get("raw_output")}
+
+        trace = _merge_trace(trace, company_result.get("trace", []), "company_research")
         trace = _merge_trace(trace, fit_result.get("trace", []), "fit_scorer")
 
         outreach_result = await run_outreach_drafter(
@@ -60,7 +71,7 @@ async def run_job_pipeline(job_url: str, user_id: str, db: AsyncSession) -> dict
         trace = _merge_trace(trace, outreach_result.get("trace", []), "outreach_drafter")
 
         job_run = JobRun(
-            user_id=user_id,
+            user_id=uuid.UUID(user_id),
             job_url=job_url,
             jd_data=jd_data,
             company_brief=company_result["data"],
