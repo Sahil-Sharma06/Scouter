@@ -1,15 +1,31 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
+import LandingPage from "./pages/LandingPage";
+import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
+function getInitialPath() {
+  return window.location.pathname || "/";
+}
+
+function normalizePath(pathname) {
+  if (pathname === "/login" || pathname === "/register" || pathname === "/analyze") {
+    return pathname;
+  }
+  return "/";
+}
+
 export default function App() {
+  const [path, setPath] = useState(() => normalizePath(getInitialPath()));
   const [token, setToken] = useState(() => localStorage.getItem("scouter_token") ?? "");
   const [email, setEmail] = useState(() => localStorage.getItem("scouter_email") ?? "");
-  const [page, setPage] = useState(() => (localStorage.getItem("scouter_token") ? "dashboard" : "login"));
-  const [apiStatus, setApiStatus] = useState("checking");
+
+  const navigate = (nextPath) => {
+    const normalized = normalizePath(nextPath);
+    window.history.pushState({}, "", normalized);
+    setPath(normalized);
+  };
 
   const storeAuth = (accessToken, userEmail) => {
     setToken(accessToken);
@@ -23,61 +39,61 @@ export default function App() {
     }
   };
 
-  const apiFetch = useCallback(
-    async (path, options = {}) => {
-      const { timeoutMs = 15000, ...rest } = options;
-      const isFormData = rest.body instanceof FormData;
-      const headers = {
-        ...(isFormData ? {} : { "Content-Type": "application/json" }),
-        ...(rest.headers || {}),
-      };
-      if (token) headers.Authorization = `Bearer ${token}`;
+  const apiFetch = async (route, options = {}) => {
+    const { timeoutMs = 15000, ...rest } = options;
+    const isFormData = rest.body instanceof FormData;
+    const headers = {
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      ...(rest.headers || {}),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      let response;
+    let response;
+    try {
+      response = await fetch(`${API_BASE}${route}`, {
+        ...rest,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error("Request timed out. Check the backend and try again.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const text = await response.text();
+    let data = null;
+    if (text) {
       try {
-        response = await fetch(`${API_BASE}${path}`, {
-          ...rest,
-          headers,
-          signal: controller.signal,
-        });
-      } catch (error) {
-        if (error?.name === "AbortError") {
-          throw new Error("Request timed out. Check the backend and try again.");
-        }
-        throw error;
-      } finally {
-        clearTimeout(timeoutId);
+        data = JSON.parse(text);
+      } catch {
+        data = text;
       }
-
-      const text = await response.text();
-      let data = null;
-      if (text) {
-        try { data = JSON.parse(text); } catch { data = text; }
-      }
-      if (!response.ok) {
-        const detail = typeof data === "string" ? data : data?.detail;
-        throw new Error(detail || response.statusText || "Request failed");
-      }
-      return data;
-    },
-    [token]
-  );
+    }
+    if (!response.ok) {
+      const detail = typeof data === "string" ? data : data?.detail;
+      throw new Error(detail || response.statusText || "Request failed");
+    }
+    return data;
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(4000) });
-        if (!cancelled) setApiStatus("ok");
-      } catch {
-        if (!cancelled) setApiStatus("unreachable");
-      }
-    })();
-    return () => { cancelled = true; };
+    const onPopState = () => setPath(normalizePath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (token && (path === "/login" || path === "/register" || path === "/")) {
+      navigate("/analyze");
+    }
+  }, [path, token]);
 
   const handleLogin = async (userEmail, password) => {
     const data = await apiFetch("/auth/login", {
@@ -85,7 +101,7 @@ export default function App() {
       body: JSON.stringify({ email: userEmail, password }),
     });
     storeAuth(data.access_token, userEmail);
-    setPage("dashboard");
+    navigate("/analyze");
   };
 
   const handleRegister = async (userEmail, password) => {
@@ -94,37 +110,28 @@ export default function App() {
       body: JSON.stringify({ email: userEmail, password }),
     });
     storeAuth(data.access_token, userEmail);
-    setPage("dashboard");
+    navigate("/analyze");
   };
 
   const handleLogout = () => {
     storeAuth("", "");
-    setPage("login");
+    navigate("/login");
   };
 
-  if (page === "login") {
+  if (path === "/login" || path === "/register") {
     return (
-      <LoginPage
-        apiStatus={apiStatus}
+      <AuthPage
+        mode={path === "/login" ? "login" : "register"}
         onLogin={handleLogin}
-        onGoRegister={() => setPage("register")}
-      />
-    );
-  }
-  if (page === "register") {
-    return (
-      <RegisterPage
-        apiStatus={apiStatus}
         onRegister={handleRegister}
-        onGoLogin={() => setPage("login")}
+        onNavigate={navigate}
       />
     );
   }
-  return (
-    <DashboardPage
-      email={email}
-      apiFetch={apiFetch}
-      onLogout={handleLogout}
-    />
-  );
+
+  if (path === "/analyze") {
+    return <DashboardPage email={email} apiFetch={apiFetch} onLogout={handleLogout} />;
+  }
+
+  return <LandingPage onNavigate={navigate} />;
 }
