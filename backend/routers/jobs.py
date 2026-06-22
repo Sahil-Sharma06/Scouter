@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl
@@ -13,7 +14,7 @@ from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-PIPELINE_TIMEOUT_SECONDS = 90
+PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
 
 
 class JobAnalyseRequest(BaseModel):

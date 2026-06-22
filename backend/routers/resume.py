@@ -13,14 +13,6 @@ from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/resume", tags=["resume"])
 
-_ALLOWED_TYPES = {
-    "application/pdf",
-    "text/plain",
-    # browsers sometimes send these for .txt
-    "text/plain; charset=utf-8",
-    "application/octet-stream",
-}
-
 
 class ResumeUploadResponse(BaseModel):
     resume_id: str
@@ -38,15 +30,19 @@ async def _ingest(db: AsyncSession, user: User, text: str) -> ResumeUploadRespon
 
     resume = Resume(user_id=user.id, text=text)
     db.add(resume)
-    await db.commit()
-    await db.refresh(resume)
+    # Flush to get the auto-generated ID without committing yet
+    await db.flush()
 
     result = await ingest_resume_text(
         user_id=str(user.id), resume_id=str(resume.id), text=text
     )
     if "error" in result:
+        # Chroma failed — roll back so the DB row is never persisted
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
 
+    await db.commit()
+    await db.refresh(resume)
     return ResumeUploadResponse(resume_id=str(resume.id))
 
 

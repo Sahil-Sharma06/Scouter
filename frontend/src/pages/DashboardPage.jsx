@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const ACCEPTED = ".pdf,.txt";
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -56,6 +56,15 @@ export default function DashboardPage({ email, apiFetch, onLogout }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null); // { type: "success"|"error", text }
   const [latest, setLatest] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const resultsRef = useRef(null);
+
+  // Scroll to results and highlight when new data arrives
+  useEffect(() => {
+    if (latest) {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [latest]);
 
   const setMsg = (type, text) => setStatus({ type, text });
 
@@ -83,7 +92,7 @@ export default function DashboardPage({ email, apiFetch, onLogout }) {
       const data = await apiFetch("/jobs/analyse", {
         method: "POST",
         body: JSON.stringify({ url: jobUrl }),
-        timeoutMs: 120000,
+        timeoutMs: 200000,
       });
       setLatest(data.result);
       setMsg("success", `Analysis complete · run ${data.job_run_id.slice(0, 8)}…`);
@@ -94,11 +103,20 @@ export default function DashboardPage({ email, apiFetch, onLogout }) {
     }
   };
 
-  const subject = latest?.outreach_email?.subject ?? "Your outreach subject will appear here.";
-  const body = latest?.outreach_email?.body ?? "Your personalised cold email body will appear here after analysis.";
-  const fitScore = latest?.fit_result?.fit_score ?? "—";
-  const topSkill = latest?.fit_result?.matched_skills?.[0] ?? "—";
+  const subject = latest?.outreach_email?.subject ?? "";
+  const body = latest?.outreach_email?.body ?? "";
+  const fitScore = latest?.fit_result?.fit_score ?? null;
+  const matchedSkills = latest?.fit_result?.matched_skills ?? [];
   const gapAnalysis = latest?.fit_result?.gap_analysis ?? null;
+  const hasResults = latest !== null;
+
+  const copyEmail = () => {
+    const text = subject ? `Subject: ${subject}\n\n${body}` : body;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   return (
     <div className="min-h-screen scouter-bg">
@@ -183,38 +201,76 @@ export default function DashboardPage({ email, apiFetch, onLogout }) {
           </div>
 
           {/* Right panel — output */}
-          <div className="float-card rounded-3xl bg-white/90 p-7 backdrop-blur reveal reveal-delay">
-            <h2 className="text-lg font-semibold text-slate-900">Latest output</h2>
-
-            <div className="mt-5 space-y-4">
-              <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Subject</p>
-                <p className="mt-2 text-sm leading-relaxed">{subject}</p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Email body</p>
-                <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">{body}</p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl bg-[color:var(--sun)] px-5 py-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-600">Fit score</p>
-                  <p className="mt-2 text-3xl font-semibold text-slate-900">{fitScore}{typeof fitScore === "number" ? "%" : ""}</p>
-                </div>
-                <div className="rounded-2xl bg-[color:var(--mint)] px-5 py-4 text-slate-900">
-                  <p className="text-xs uppercase tracking-[0.2em]">Top skill match</p>
-                  <p className="mt-2 text-base font-semibold">{topSkill}</p>
-                </div>
-              </div>
-
-              {gapAnalysis && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gap analysis</p>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">{gapAnalysis}</p>
-                </div>
+          <div
+            ref={resultsRef}
+            className={`float-card rounded-3xl bg-white/90 p-7 backdrop-blur reveal reveal-delay transition-all duration-500 ${
+              hasResults ? "ring-2 ring-[color:var(--mint)]" : ""
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Latest output</h2>
+              {hasResults && (
+                <span className="rounded-full bg-[color:var(--mint)] px-2.5 py-0.5 text-xs font-semibold text-slate-900">
+                  New
+                </span>
               )}
             </div>
+
+            {!hasResults ? (
+              <div className="mt-6 flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <p className="text-sm text-slate-400">Results will appear here after analysis.</p>
+                <p className="text-xs text-slate-300">Upload a resume and paste a job URL to get started.</p>
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                {/* Outreach email */}
+                <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Subject</p>
+                  <p className="mt-2 text-sm leading-relaxed">
+                    {subject || <span className="italic text-slate-500">No subject returned.</span>}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Email body</p>
+                    <button
+                      onClick={copyEmail}
+                      className="text-xs font-medium text-slate-400 transition-colors hover:text-slate-700"
+                    >
+                      {copied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                    {body || <span className="italic text-slate-400">No email body returned.</span>}
+                  </p>
+                </div>
+
+                {/* Fit score */}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-[color:var(--sun)] px-5 py-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-600">Fit score</p>
+                    <p className="mt-2 text-3xl font-semibold text-slate-900">
+                      {fitScore !== null ? `${fitScore}%` : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-[color:var(--mint)] px-5 py-4 text-slate-900">
+                    <p className="text-xs uppercase tracking-[0.2em]">Matched skills</p>
+                    <p className="mt-2 text-sm font-semibold leading-relaxed">
+                      {matchedSkills.length > 0 ? matchedSkills.slice(0, 3).join(", ") : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Gap analysis */}
+                {gapAnalysis && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gap analysis</p>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">{gapAnalysis}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -14,14 +15,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.db.database import engine
 from backend.db.models import Base
 from backend.routers import auth, jobs, resume
+from tools.playwright_tool import _get_browser
 
 load_dotenv()
+
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Pre-warm Playwright so the first job request doesn't pay the cold-start cost
+    try:
+        await _get_browser()
+    except Exception:
+        pass
     yield
 
 
@@ -29,10 +39,10 @@ app = FastAPI(title="Scouter API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 app.include_router(auth.router)

@@ -33,7 +33,7 @@ async def run_jd_fetcher(job_url: str) -> dict:
     try:
         result = await agent.ainvoke(
             {"messages": [("user", f"Job URL: {job_url}")]},
-            config={"recursion_limit": 10},
+            config={"recursion_limit": 6},
         )
     except Exception as exc:
         return {"error": f"JD Fetcher failed: {exc}", "trace": []}

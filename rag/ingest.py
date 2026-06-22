@@ -13,6 +13,12 @@ async def ingest_resume_text(user_id: str, resume_id: str, text: str) -> dict:
             chunks = splitter.split_text(text)
             client = chromadb.PersistentClient(path="./chroma_db")
             collection = client.get_or_create_collection(name="resume_chunks")
+
+            # Remove all previous chunks for this user before inserting the new resume
+            existing = collection.get(where={"user_id": user_id})
+            if existing["ids"]:
+                collection.delete(ids=existing["ids"])
+
             ids = [f"{resume_id}_{idx}" for idx in range(len(chunks))]
             metadatas = [
                 {"user_id": user_id, "resume_id": resume_id, "chunk_index": idx}

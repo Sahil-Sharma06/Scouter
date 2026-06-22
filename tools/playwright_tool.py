@@ -1,40 +1,63 @@
 from __future__ import annotations
 
-import re
+import asyncio
 
-import httpx
+from playwright.async_api import Browser, Playwright, async_playwright
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+_pw: Playwright | None = None
+_browser: Browser | None = None
+_lock: asyncio.Lock | None = None
 
 
-def _html_to_text(html: str) -> str:
-    html = re.sub(r"<(script|style)[^>]*>.*?</(script|style)>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"</(p|div|li|h[1-6]|tr|br)[^>]*>", "\n", html, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", html)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+def _get_lock() -> asyncio.Lock:
+    global _lock
+    if _lock is None:
+        _lock = asyncio.Lock()
+    return _lock
+
+
+async def _get_browser() -> Browser:
+    global _pw, _browser
+    async with _get_lock():
+        if _browser is not None and _browser.is_connected():
+            return _browser
+        if _pw is not None:
+            try:
+                await _pw.stop()
+            except Exception:
+                pass
+        _pw = await async_playwright().start()
+        _browser = await _pw.chromium.launch(headless=True)
+    return _browser
 
 
 async def playwright_fetch(url: str) -> dict:
     try:
-        async with httpx.AsyncClient(
-            timeout=15.0, follow_redirects=True, headers=_HEADERS
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            html = response.text
-        text = _html_to_text(html)
+        browser = await _get_browser()
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="en-US",
+        )
+        page = await context.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            # Give JS-heavy pages time to settle; networkidle can hang on chatty pages
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            html = await page.content()
+            try:
+                text = await page.inner_text("body")
+            except Exception:
+                text = ""
+        finally:
+            await context.close()
+
         return {"url": url, "html": html[:12000], "text": text[:8000]}
-    except httpx.TimeoutException:
-        return {"url": url, "error": "Timeout while fetching page"}
     except Exception as exc:
         return {"url": url, "error": f"Failed to fetch page: {exc}"}

@@ -33,7 +33,7 @@ async def run_fit_scorer(required_skills: list[str]) -> dict:
     try:
         result = await agent.ainvoke(
             {"messages": [("user", f"Required skills: {query}")]},
-            config={"recursion_limit": 10},
+            config={"recursion_limit": 6},
         )
     except Exception as exc:
         return {"error": f"Fit Scorer failed: {exc}", "trace": []}

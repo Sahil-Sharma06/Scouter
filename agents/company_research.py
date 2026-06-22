@@ -32,7 +32,7 @@ async def run_company_research(company_name: str) -> dict:
     try:
         result = await agent.ainvoke(
             {"messages": [("user", f"Company: {company_name}")]},
-            config={"recursion_limit": 25},
+            config={"recursion_limit": 8},
         )
     except Exception as exc:
         return {"error": f"Company Research failed: {exc}", "trace": []}

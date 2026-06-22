@@ -18,7 +18,7 @@ engine = create_async_engine(
     future=True,
     pool_pre_ping=True,
     pool_timeout=10,
-    connect_args={"timeout": 10},
+    connect_args={"command_timeout": 10},
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
